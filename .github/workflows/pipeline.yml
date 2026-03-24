@@ -18,6 +18,9 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      FORCE_LOW_ACCURACY: ${{ github.event.inputs.force_low_accuracy || 'false' }}
 
     steps:
       - name: Checkout
@@ -42,9 +45,6 @@ jobs:
           fi
 
       - name: Train model and log to MLflow
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          FORCE_LOW_ACCURACY: ${{ github.event.inputs.force_low_accuracy || 'false' }}
         run: |
           if [ -z "$MLFLOW_TRACKING_URI" ]; then
             export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
@@ -59,7 +59,7 @@ jobs:
           path: model_info.txt
 
       - name: Upload local MLflow DB artifact
-        if: ${{ secrets.MLFLOW_TRACKING_URI == '' }}
+        if: ${{ env.MLFLOW_TRACKING_URI == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: mlflow-db
@@ -69,6 +69,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: validate
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      ACCURACY_THRESHOLD: "0.85"
 
     steps:
       - name: Checkout
@@ -91,16 +94,13 @@ jobs:
           path: .
 
       - name: Download local MLflow DB artifact
-        if: ${{ secrets.MLFLOW_TRACKING_URI == '' }}
+        if: ${{ env.MLFLOW_TRACKING_URI == '' }}
         uses: actions/download-artifact@v4
         with:
           name: mlflow-db
           path: .
 
       - name: Validate accuracy threshold
-        env:
-          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-          ACCURACY_THRESHOLD: "0.85"
         run: |
           if [ -z "$MLFLOW_TRACKING_URI" ]; then
             export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
