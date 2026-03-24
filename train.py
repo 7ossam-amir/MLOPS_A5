@@ -4,6 +4,7 @@ import sys
 
 import mlflow
 import mlflow.sklearn
+import numpy as np
 from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
@@ -14,6 +15,18 @@ def as_bool(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "y"}
 
 
+def load_training_data():
+    data_path = os.getenv("DATA_PATH", "data/iris.csv")
+    if os.path.exists(data_path):
+        data = np.loadtxt(data_path, delimiter=",", skiprows=1)
+        x_data = data[:, :-1]
+        y_data = data[:, -1].astype(int)
+        return x_data, y_data, f"csv:{data_path}"
+
+    iris = load_iris()
+    return iris.data, iris.target, "sklearn_builtin_iris"
+
+
 def main() -> int:
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
     experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "assignment5")
@@ -22,9 +35,9 @@ def main() -> int:
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
 
-    iris = load_iris()
+    x_data, y_data, data_source = load_training_data()
     x_train, x_test, y_train, y_test = train_test_split(
-        iris.data, iris.target, test_size=0.2, random_state=42, stratify=iris.target
+        x_data, y_data, test_size=0.2, random_state=42, stratify=y_data
     )
 
     if force_low:
@@ -40,6 +53,7 @@ def main() -> int:
 
         mlflow.log_param("model_type", "LogisticRegression")
         mlflow.log_param("force_low_accuracy", force_low)
+        mlflow.log_param("data_source", data_source)
         mlflow.log_metric("accuracy", accuracy)
         mlflow.sklearn.log_model(model, artifact_path="model")
 
