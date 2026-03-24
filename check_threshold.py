@@ -5,6 +5,18 @@ import mlflow
 from mlflow.tracking import MlflowClient
 
 
+def write_github_outputs(run_id: str, accuracy: float, threshold: float, passed: bool) -> None:
+    output_path = os.getenv("GITHUB_OUTPUT")
+    if not output_path:
+        return
+
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write(f"run_id={run_id}\n")
+        f.write(f"accuracy={accuracy:.4f}\n")
+        f.write(f"threshold={threshold:.2f}\n")
+        f.write(f"passed={'true' if passed else 'false'}\n")
+
+
 def main() -> int:
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
     threshold = float(os.getenv("ACCURACY_THRESHOLD", "0.85"))
@@ -33,8 +45,10 @@ def main() -> int:
     print(f"Run ID: {run_id}")
     print(f"Accuracy: {accuracy:.4f}")
     print(f"Threshold: {threshold:.2f}")
+    passed = accuracy >= threshold
+    write_github_outputs(run_id=run_id, accuracy=accuracy, threshold=threshold, passed=passed)
 
-    if accuracy < threshold:
+    if not passed:
         print("FAIL: Accuracy is below threshold.")
         return 1
 

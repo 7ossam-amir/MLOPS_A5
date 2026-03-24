@@ -101,12 +101,29 @@ jobs:
           path: .
 
       - name: Validate accuracy threshold
+        id: gate
         run: |
           if [ -z "$MLFLOW_TRACKING_URI" ]; then
             export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
           fi
           python check_threshold.py
 
+      - name: Publish model gate summary
+        if: always()
+        run: |
+          echo "## Model Gate Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Run ID: $(cat model_info.txt)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ steps.gate.outputs.accuracy }}" ]; then
+            echo "- Accuracy: ${{ steps.gate.outputs.accuracy }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Threshold: ${{ steps.gate.outputs.threshold }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Passed: ${{ steps.gate.outputs.passed }}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Accuracy: unavailable" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Threshold: 0.85" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Passed: false" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Mock Docker build
         run: |
+          echo "Deploy approved: accuracy >= 0.85"
           echo "Building Docker image for Run ID: $(cat model_info.txt)"
