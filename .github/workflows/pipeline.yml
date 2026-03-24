@@ -35,7 +35,11 @@ jobs:
 
       - name: Pull data with DVC
         run: |
-          dvc pull || echo "No DVC remote/data configured yet. Continuing with tiny built-in dataset."
+          if [ -d ".dvc" ]; then
+            dvc pull
+          else
+            echo "Skipping dvc pull: .dvc directory not found."
+          fi
 
       - name: Train model and log to MLflow
         env:
@@ -43,7 +47,7 @@ jobs:
           FORCE_LOW_ACCURACY: ${{ github.event.inputs.force_low_accuracy || 'false' }}
         run: |
           if [ -z "$MLFLOW_TRACKING_URI" ]; then
-            export MLFLOW_TRACKING_URI="file:./mlruns"
+            export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
           fi
           python train.py
           test -s model_info.txt
@@ -53,6 +57,14 @@ jobs:
         with:
           name: model-info
           path: model_info.txt
+
+      - name: Upload local MLflow DB artifact
+        if: ${{ secrets.MLFLOW_TRACKING_URI == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlflow-db
+          path: mlflow.db
+          if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
@@ -78,13 +90,20 @@ jobs:
           name: model-info
           path: .
 
+      - name: Download local MLflow DB artifact
+        if: ${{ secrets.MLFLOW_TRACKING_URI == '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: mlflow-db
+          path: .
+
       - name: Validate accuracy threshold
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
           ACCURACY_THRESHOLD: "0.85"
         run: |
           if [ -z "$MLFLOW_TRACKING_URI" ]; then
-            export MLFLOW_TRACKING_URI="file:./mlruns"
+            export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
           fi
           python check_threshold.py
 
