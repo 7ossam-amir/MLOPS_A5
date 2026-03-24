@@ -39,7 +39,11 @@ jobs:
       - name: Pull data with DVC
         run: |
           if [ -d ".dvc" ]; then
-            dvc pull
+            if dvc remote list | grep -q .; then
+              dvc pull || echo "Skipping dvc pull: configured remote is unreachable from this runner."
+            else
+              echo "Skipping dvc pull: no DVC remote configured."
+            fi
           else
             echo "Skipping dvc pull: .dvc directory not found."
           fi
