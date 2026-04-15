@@ -1,26 +1,34 @@
-name: mlops-assignment-5
+name: gated-train-pipeline
 
 on:
   push:
     branches:
-      - main
-  workflow_dispatch:
-    inputs:
-      force_low_accuracy:
-        description: "Set true to force a failing run (< 0.85)"
-        required: true
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
+      - "**"
 
 jobs:
-  validate:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Run lightweight linter
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+          ruff check . --select E9,F63,F7,F82
+
+  train:
+    runs-on: ubuntu-latest
+    needs: lint
+    if: ${{ needs.lint.result == 'success' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[run-train]') }}
     env:
       MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-      FORCE_LOW_ACCURACY: ${{ github.event.inputs.force_low_accuracy || 'false' }}
 
     steps:
       - name: Checkout
@@ -31,103 +39,36 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install training dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mlflow scikit-learn dvc
+          pip install mlflow scikit-learn
 
-      - name: Pull data with DVC
+      - name: Train model
         run: |
-          if [ -d ".dvc" ]; then
-            if dvc remote list | grep -q .; then
-              dvc pull || echo "Skipping dvc pull: configured remote is unreachable from this runner."
-            else
-              echo "Skipping dvc pull: no DVC remote configured."
-            fi
-          else
-            echo "Skipping dvc pull: .dvc directory not found."
-          fi
-
-      - name: Train model and log to MLflow
-        run: |
+          set -o pipefail
           if [ -z "$MLFLOW_TRACKING_URI" ]; then
             export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
           fi
-          python train.py
-          test -s model_info.txt
+          python train.py 2>&1 | tee train_output.log
 
-      - name: Upload model_info artifact
+      - name: Create error log file
+        if: ${{ failure() }}
+        run: |
+          if [ -f train_output.log ]; then
+            cp train_output.log error_logs.txt
+          else
+            echo "Training failed before logs were generated." > error_logs.txt
+          fi
+
+      - name: Upload error logs
+        if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: model-info
-          path: model_info.txt
-
-      - name: Upload local MLflow DB artifact
-        if: ${{ env.MLFLOW_TRACKING_URI == '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: mlflow-db
-          path: mlflow.db
+          name: train-error-logs
+          path: error_logs.txt
           if-no-files-found: error
 
-  deploy:
-    runs-on: ubuntu-latest
-    needs: validate
-    env:
-      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
-      ACCURACY_THRESHOLD: "0.85"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install mlflow
-
-      - name: Download model_info artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: model-info
-          path: .
-
-      - name: Download local MLflow DB artifact
-        if: ${{ env.MLFLOW_TRACKING_URI == '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: mlflow-db
-          path: .
-
-      - name: Validate accuracy threshold
-        id: gate
-        run: |
-          if [ -z "$MLFLOW_TRACKING_URI" ]; then
-            export MLFLOW_TRACKING_URI="sqlite:///mlflow.db"
-          fi
-          python check_threshold.py
-
-      - name: Publish model gate summary
-        if: always()
-        run: |
-          echo "## Model Gate Result" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Run ID: $(cat model_info.txt)" >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "${{ steps.gate.outputs.accuracy }}" ]; then
-            echo "- Accuracy: ${{ steps.gate.outputs.accuracy }}" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Threshold: ${{ steps.gate.outputs.threshold }}" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Passed: ${{ steps.gate.outputs.passed }}" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- Accuracy: unavailable" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Threshold: 0.85" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Passed: false" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Mock Docker build
-        run: |
-          echo "Deploy approved: accuracy >= 0.85"
-          echo "Building Docker image for Run ID: $(cat model_info.txt)"
+      - name: Final cleanup
+        if: ${{ always() }}
+        run: echo "Cleaning up temporary cloud volumes..."

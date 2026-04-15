@@ -33,7 +33,16 @@ def main() -> int:
     force_low = as_bool(os.getenv("FORCE_LOW_ACCURACY", "false"))
 
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.set_experiment(experiment_name)
+    try:
+        mlflow.set_experiment(experiment_name)
+    except Exception as exc:
+        fallback_uri = "file:./mlruns"
+        print(
+            f"Warning: MLflow URI '{tracking_uri}' is unavailable ({exc}). "
+            f"Falling back to '{fallback_uri}'."
+        )
+        mlflow.set_tracking_uri(fallback_uri)
+        mlflow.set_experiment(experiment_name)
 
     x_data, y_data, data_source = load_training_data()
     x_train, x_test, y_train, y_test = train_test_split(
@@ -41,7 +50,6 @@ def main() -> int:
     )
 
     if force_low:
-        # Deliberately scramble labels to make accuracy poor for failure demos.
         y_train = [random.choice([0, 1, 2]) for _ in y_train]
 
     model = LogisticRegression(max_iter=200)
