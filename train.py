@@ -28,6 +28,8 @@ def load_training_data():
 
 
 def main() -> int:
+    raise RuntimeError("forced failure for artifact test")
+
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
     experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "assignment5")
     force_low = as_bool(os.getenv("FORCE_LOW_ACCURACY", "false"))
